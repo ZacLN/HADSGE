@@ -1,4 +1,4 @@
-using HA-DSGE
+using HADSGE
 using Base.Test
 
 # write your own tests here
