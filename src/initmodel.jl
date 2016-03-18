@@ -1,6 +1,6 @@
-import SparseGrids:NGrid,QuadraticBF,CC
+import SparseGrids:NGrid,Quadratic,Linear,CC
 function initS(slist::Vector{Variable})
-    G = NGrid(Int[CC.iM(length(x))-1 for x in slist],hcat(Vector{Float64}[x.bounds for x in slist]...),B=QuadraticBF)
+    G = NGrid(Int[CC.iM(length(x))-1 for x in slist],hcat(Vector{Float64}[x.bounds for x in slist]...),B=Quadratic)
     S = values(G)
     for s in slist
         s.x = sort(unique(S[:,find(slist,s.name)]))
@@ -38,9 +38,9 @@ end
 
 
 function initX(M::Model)
-    for i = 1:length(Static(M.variables))
-        v = Static(M.variables)[i]
-        if isa(v,Exogenous) || isa(v,Aggregate)
+    for i = 1:length(M.variables)
+        v = M.variables[i]
+        if isa(v,Policy) || isa(v,Exogenous) || isa(v,Aggregate)
             if isa(v.init,Number)
                 M.X[:,i] = v.init
             elseif isa(v.init,Expr)
@@ -48,7 +48,7 @@ function initX(M::Model)
                 initv = getv(init)
                 @assert all(map(x->in(x.args[1],names(State(M.variables))),initv)) "Initialisation of $(v.name) includes a non state variable"
                 for j = 1:length(M)
-                    initD=[x=>M.S[j,find(State(M.variables),x.args[1])] for x in initv]
+                    initD=[x=>M.X[j,find(State(M.variables),x.args[1])] for x in initv]
                     M.X[j,i]=eval(current_module(),subs(init,initD))
                 end
             end
@@ -63,10 +63,10 @@ function initD(M::Model)
         F = quote
                 function $(gensym(v.name))(M)
                     for i = 1:length(M)
-                        $(M.X)[i,$(find(Static(M.variables),v.name))] = $(subs(v.e,hloc))
+                        $(M.X)[i,$(find(M.variables,v.name))] = $(subs(v.e,hloc))
                     end
                 end
             end
-        v.update=eval(F)
+        v.update=eval(current_module(),F)
     end
 end

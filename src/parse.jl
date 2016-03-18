@@ -112,6 +112,23 @@ function getv(x,list=Expr[],ignore=operators)
     return unique(list)
 end
 
+
+function vecind!(x::Expr,n::Int)
+    if x.head == :ref
+        if length(x.args)==3
+            x.args[2]=x.args[2]+(pop!(x.args)-1)*n
+        end
+    else
+        for i = 1:length(x.args)
+            if isa(x.args[i],Expr)
+                x.args[i] = vecind!(x.args[i],n)
+            end
+        end
+    end
+    x
+end
+
+
 function simplifyindices!(x)
     if isa(x,Expr)
         if x.head==:ref
@@ -186,10 +203,6 @@ function +{T<:Union{Expr,Symbol},S<:Float64}(x2::Vector{S},x1::T)
     end
     return out
 end
-
-
-
-
 
 -{T<:Union{Expr,Symbol,Number}}(x::T) = -1*x
 

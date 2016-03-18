@@ -91,7 +91,7 @@ function find(list::Vector{Variable},v::Symbol)
 end
 display(v::Variable) = print((typeof(v)==Aggregate ? "∫" : "" ),v.name,((typeof(v)==Endogenous || (typeof(v)==Aggregate && typeof(v.target)==Endogenous) ) ? "[-1]" : "[0]"))
 display(v::Future) = print(v.name,"[1]")
-display(V::Vector{Variable}) = [(length(T(V))>0 && (print(string(T)[1:4],":");[(print("  ");display(v)) for v  in T(V)]);println()) for T in [Endogenous,Stochastic,Policy,Exogenous,Aggregate,Dependant,Future]]
+display(V::Vector{Variable}) = [(length(T(V))>0 && (print(split(string(T),".")[end][1:4],":");[(print("  ");display(v)) for v  in T(V)]);println()) for T in [Endogenous,Stochastic,Policy,Exogenous,Aggregate,Dependant,Future]]
 
 
 length{T<:State}(v::T) = length(v.x)
@@ -129,8 +129,6 @@ function parseex(ex::Expr)
     end
 end
 parse(ex::Expr) = parseex(ex)(ex)
-
-
 
 function parsevars(foc::Expr,states::Expr,vars::Expr,params::Expr)
     parameters   = Dict{Symbol,Float64}(zip([x.args[1] for x in params.args],[x.args[2] for x in params.args]))
@@ -190,18 +188,22 @@ function parsevars(foc::Expr,states::Expr,vars::Expr,params::Expr)
     return variables,parameters,f2,j2
 end
 
+
+
 function hardloc(variables::Vector{Variable})
+    ns = length(State(variables))
     hloc = Dict{Expr,Expr}()
+
     for v in variables
         if isa(v,Endogenous)
-            push!(hloc,Expr(:ref,v.name,-1)=>:(M.S[i,$(findfirst(State(variables),v))]))
+            push!(hloc,Expr(:ref,v.name,-1)=>:(M.X[i,$(findfirst(variables,v))]))
         elseif isa(v,Stochastic)
-            push!(hloc,Expr(:ref,v.name,0)=>:(M.S[i,$(findfirst(State(variables),v))]))
+            push!(hloc,Expr(:ref,v.name,0)=>:(M.X[i,$(findfirst(variables,v))]))
             push!(hloc,Expr(:ref,v.name,1)=>:(M.SP[i+(j-1)*length(M),$(findfirst(State(variables),v))]))
         elseif isa(v,Policy)
-            push!(hloc,Expr(:ref,v.name,0)=>:(M.U[i,$(findfirst(Policy(variables),v))]))
-        elseif isa(v,Static) #|| isa(v,Dependant)
-            push!(hloc,Expr(:ref,v.name,timeof(v))=>:(M.X[i,$(findfirst(Static(variables),v))]))
+            push!(hloc,Expr(:ref,v.name,0)=>:(M.X[i,$(ns+findfirst(State(variables,true),v))]))
+        elseif isa(v,Static)
+            push!(hloc,Expr(:ref,v.name,timeof(v))=>:(M.X[i,$(ns+findfirst(State(variables,true),v))]))
         elseif isa(v,Future)
             push!(hloc,Expr(:ref,v.name,1)=>:(M.XP[i+(j-1)*length(M),$(findfirst(Future(variables),v))]))
         end
