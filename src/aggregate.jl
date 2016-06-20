@@ -23,154 +23,62 @@ kron{n}(a::Array{bracket{n},1})= a
 convert(::Type{Tuple},x::Vector{Int})=ntuple(i->x[i],length(x))
 spzeros(n::Int) = SparseVector(n,Int[],Float64[])
 
+
+
+"
+   updateT(M)
+
+Compute transition matrix for model M using tensor grid.
+"
 function updateT(M::Model)
     N = length(M.distribution.G[1])
-    Pf = Vector{Float64}[clamp!(M(s.name,hcat([g[:] for g in M.distribution.G]...)),s.bounds...) for s in Endogenous(M.variables)]
-
-    dims1  = ntuple(i->length(Endogenous(M.variables)[i]),length(Endogenous(M.variables)))
-    pdims1 = prod(dims1)
-    Gdims = size(M.distribution.G[1])
-
-    M.distribution.T.colptr = ones(Int,size(M.distribution.T,1)+1)
-    M.distribution.T.nzval=Float64[]
-    M.distribution.T.rowval=Float64[]
-
     Endo = Endogenous(M.variables)
     Stoc = Stochastic(M.variables)
-    ne = length(Endo)
-    for i = 1:N
-        brackets = [bracket(Pf[ie][i],Endo[ie].x) for ie = 1:length(Endo)]
-        S1= collect(ind2sub(Gdims,i))[ne+1:end]
-        abrackets = kron(brackets...)
-
-        w = spzeros(pdims1)
-        for b in abrackets
-            w[sub2ind(dims1,b.i...)]+=b.w
-        end
-        for S2 = 1:length(Stoc)
-            if isag(Stoc[S2])
-                w = vcat([w[:]*p for p ∈ Stoc[S2].T[:,S1[S2]]]...)
-            else
-                w = vcat([w[:]*p for p ∈ Stoc[S2].T[S1[S2],:]]...)
-            end
-        end
-
-        for j = 1:length(w.nzind)
-            M.distribution.T[w.nzind[j],i] += w.nzval[j]
-        end
-    end
-    return
-end
-
-function updateT1(M::Model)
-    N = length(M.distribution.G[1])
     Pf = Vector{Float64}[clamp!(M(s.name,hcat([g[:] for g in M.distribution.G]...)),s.bounds...) for s in Endogenous(M.variables)]
     Gdims = size(M.distribution.G[1])
     Sdim   = tuple([length(s) for s in Stochastic(M.variables)]...)
 
-    M.distribution.T.colptr = ones(Int,size(M.distribution.T,1)+1)
-    M.distribution.T.nzval=Float64[]
-    M.distribution.T.rowval=Float64[]
+    ns = length(Stoc)
+    nT = prod(Sdim)*length(Endo)*2
+    vals = zeros(N,nT)
+    rloc = zeros(UInt32,N,nT)
+    cloc = zeros(UInt32,N,nT)
+    ccnt = zeros(UInt32,N)
 
-    Endo = Endogenous(M.variables)
-    Stoc = Stochastic(M.variables)
     ne = length(Endo)
+    # progress=zeros(Int32,Base.Threads.nthreads())
     for i = 1:N
+        # progress[threadid()]+=1
+        # threadid()==1 && div(i,80)==0 && print(signif(sum(progress)/N,3)," ")
         brackets = [bracket(Pf[ie][i],Endo[ie].x) for ie = 1:length(Endo)]
         S1= collect(ind2sub(Gdims,i))[ne+1:end]
         abrackets = kron(brackets...)
 
+        cnt = 0
         for j = 1:length(abrackets)
             for jj ∈ CartesianRange(Sdim)
                 t = 1.0
-                for S2 = 1:length(Stoc)
+                for S2 = 1:ns
                     if isag(Stoc[S2])
                         t*= Stoc[S2].T[jj.I[S2],S1[S2]]
                     else
                         t*= Stoc[S2].T[S1[S2],jj.I[S2]]
                     end
                 end
-                M.distribution.T[sub2ind(Gdims,abrackets[j].i...,jj.I...),i]+=abrackets[j].w*t
+                cnt+=1
+                rloc[i,cnt] = sub2ind(Gdims,abrackets[j].i...,jj.I...)
+                vals[i,cnt] = abrackets[j].w*t
+                cloc[i,cnt] = i
+                ccnt[i] = cnt
             end
         end
     end
+    rloc,cloc,vals= vec(rloc),vec(cloc),vec(vals)
+    id = (vals.==0)
+    M.distribution.T = sparse(rloc[!id],cloc[!id],vals[!id],N,N)
     return
 end
 
-function updateT2(M::Model)
-    Endo = Endogenous(M.variables)
-    Stoc = Stochastic(M.variables)
-    ne,ns = length(Endo),length(Stoc)
-    n = ne+ns
-    Gstoc = hcat([x[:] for x ∈ ndgrid([v.x for v in Stoc]...)]...)
-    dims = size(M.distribution.G[1])
-    Sdims = ([length(v.x) for v ∈ Stochastic(M.variables)]...)
-
-    M.distribution.T.colptr = ones(Int,size(M.distribution.T,1)+1)
-    M.distribution.T.nzval=Float64[]
-    M.distribution.T.rowval=Float64[]
-
-    for i ∈ CartesianRange(dims)
-        Ei = CartesianIndex{ne}(i.I[1:ne]...)
-        Si = CartesianIndex{ns}(i.I[ne+1:end]...)
-        X = hcat(Float64[Endo[j].x[i.I[j]] for k=1:size(Gstoc,1),j = 1:ne],Gstoc)
-        XP = hcat([clamp!(M(v.name,X),v.bounds...) for v ∈ Endo]...,Gstoc)
-        for j ∈ 1:size(Gstoc,1)
-            B = bracket(XP[j,1], M.variables[1].x)
-            for k = 2:n
-                v = M.variables[k]
-                B = kron(B,bracket(XP[j,k],v.x))
-                if isa(v,Stochastic)
-                    [(b.w*=M.variables[k].T[i.I[k],ind2sub(Sdims,j)[k-ne]]) for b in B]
-                end
-            end
-            for b in B
-                M.distribution.T[sub2ind(dims,b.i...),sub2ind(dims,i.I...)]+=b.w
-            end
-        end
-    end
-    return
-end
-
-function updateT3(M::Model)
-    Endo = Endogenous(M.variables)
-    Stoc = Stochastic(M.variables)
-    ne,ns = length(Endo),length(Stoc)
-    n = ne+ns
-    Gendo = hcat([x[:] for x ∈ ndgrid([v.x for v in Endo]...)]...)
-    Gstoc = hcat([x[:] for x ∈ ndgrid([v.x for v in Stoc]...)]...)
-
-    dims = size(M.distribution.G[1])
-    Edims = ([length(v.x) for v ∈ Endo]...)
-    Sdims = ([length(v.x) for v ∈ Stoc]...)
-    XP =  [reshape(clamp!(M(s.name,hcat([g[:] for g in M.distribution.G]...)),s.bounds...),prod(size(Gendo)),prod(size(Gstoc))) for s in Endo]
-
-    M.distribution.T.colptr = ones(Int,size(M.distribution.T,1)+1)
-    M.distribution.T.nzval=Float64[]
-    M.distribution.T.rowval=Float64[]
-
-    for i ∈ CartesianRange(dims)
-        Ei = CartesianIndex{ne}(i.I[1:ne]...)
-        Si = CartesianIndex{ns}(i.I[ne+1:end]...)
-        xP = hcat(hcat([XP[j][sub2ind(Edims,Ei.I...),:] for j = 1:ne]...),vec(Gstoc))
-        for j ∈ 1:size(Gstoc,1)
-            B = [bracket{0}([0],0)]
-            for k = 1:n
-                v = M.variables[k]
-                B = kron(B,bracket(xP[j,k],v.x))
-                if isa(v,Stochastic)
-                    for b in B
-                        b.w*=v.T[i.I[k],ind2sub(Sdims,j)[k-ne]]
-                    end
-                end
-            end
-            for b in B
-                M.distribution.T[sub2ind(dims,b.i...),sub2ind(dims,i.I...)]+=b.w
-            end
-        end
-    end
-    return
-end
 
 function updated(M::Model)
     d0 = M.distribution.d[:]+.25

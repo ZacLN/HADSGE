@@ -1,3 +1,8 @@
+"""
+     rouwenhorst(μ,ρ,σ,n)
+Generates a finite state Markov representation of the AR process defined by the
+supplied parameters. Returns the states and transition matrix.
+"""
 function rouwenhorst(μ,ρ,σ,n)
     n==1 && (return [μ],[1.0])
 
@@ -13,11 +18,13 @@ function rouwenhorst(μ,ρ,σ,n)
 	return x,P
 end
 
-function cdf_normal(x) :inline
-    c = 0.5 * erfc(-x/sqrt(2))
-end
-
+"""
+     tauchen(μ,ρ,σ,n)
+Generates a finite state Markov representation of the AR process defined by the
+supplied parameters. Returns the states and transition matrix.
+"""
 function tauchen(μ,ρ,σ,N,m=3)
+    cdf_normal(x) = 0.5 * erfc(-x/sqrt(2))
 	if N==1
 		return [μ],[1.0]
 	end

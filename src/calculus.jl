@@ -1,7 +1,7 @@
 import Calculus:differentiate,jacobian,simplify,SymbolParameter,isminus
 
-
 function simplify(::SymbolParameter{:-}, args)
+	# Remove redundant subtractions: (x-0) == x
 	if length(args) == 2 && args[2]==0
 		return args[1]
 	end
@@ -16,14 +16,9 @@ function simplify(::SymbolParameter{:-}, args)
     elseif length(args) == 2 && isminus(args[2])
         return Expr(:call, :+, args[1], args[2].args[2])
     else
-	        return Expr(:call, :-, args...)
+	    return Expr(:call, :-, args...)
     end
 end
-
-
-
-
-
 
 function differentiate(ex::Expr,wrt::Expr)
 	if ex.head==:vect || ex.head ==:vcat
@@ -67,9 +62,8 @@ function jacobian(ex::Expr, targets::Vector)
 end
 
 differentiate(::SymbolParameter{:max}, args, wrt) = Expr(:if,:($(args[1])>$(args[2])),differentiate(args[1],wrt),differentiate(args[2],wrt))
+
 differentiate(::SymbolParameter{:min}, args, wrt) = Expr(:if,:($(args[1])<$(args[2])),differentiate(args[1],wrt),differentiate(args[2],wrt))
-
-
 
 function simplify(ex::Expr)
 	if in(ex.head,[:vcat,:row])
@@ -83,7 +77,7 @@ function simplify(ex::Expr)
         return ex
     end
 
-    if all(Calculus.isnumber, ex.args[2:end]) && length(ex.args) > 1
+    if all(isnumber, ex.args[2:end]) && length(ex.args) > 1
         return eval(current_module(), ex)
     end
     new_ex = simplify(SymbolParameter(ex.args[1]), ex.args[2:end])

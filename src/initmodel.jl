@@ -1,6 +1,10 @@
-import SparseGrids:NGrid,Quadratic,Linear,CC
-function initS(slist::Vector{Variable})
-    G = NGrid(Int[CC.iM(length(x))-1 for x in slist],hcat(Vector{Float64}[x.bounds for x in slist]...),B=Quadratic)
+import SparseGrids:NGrid,Quadratic,Linear
+function initS(slist::Vector{Variable},B=Quadratic,G1 = nothing)
+    if G1==nothing
+        G = NGrid(Int[SparseGrids.cc_iM(length(x))-1 for x in slist],hcat(Vector{Float64}[x.bounds for x in slist]...),B=B)
+    else
+        G = G1
+    end
     S = values(G)
     for s in slist
         s.x = sort(unique(S[:,find(slist,s.name)]))
@@ -17,24 +21,6 @@ function initS(slist::Vector{Variable})
 end
 
 
-
-function initU(M::Model)
-    for i = 1:length(Policy(M.variables))
-        v = Policy(M.variables)[i]
-        if isa(v.init,Number)
-            M.U[:,i] = v.init
-        elseif isa(v.init,Expr)
-            init = addindex!(v.init)
-            initv = getv(init)
-            @assert all(map(x->in(x.args[1],names(State(M.variables))),initv)) "Initialisation of $(v.name) includes a non state variable"
-            for j = 1:length(M)
-                initlist=[x=>M.S[j,find(State(M.variables),x.args[1])] for x in initv]
-                M.U[j,i]=eval(current_module(),subs(init,initlist))
-            end
-        end
-    end
-    return
-end
 
 
 function initX(M::Model)

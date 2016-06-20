@@ -1,3 +1,4 @@
+import SparseGrids.cc_g
 abstract Variable
 abstract Idiosyncratic
 abstract Collective
@@ -8,7 +9,7 @@ type Endogenous <: State
     x::Vector{Float64}
     lom::Variable
     bounds::Vector{Float64}
-    Endogenous(v::Expr,v1::Expr) = new(v.args[1],CC.g(v.args[2].args[3]+1)*(v.args[2].args[2]-v.args[2].args[1])+v.args[2].args[1],parse(v1),v.args[2].args[1:2])
+    Endogenous(v::Expr,v1::Expr) = new(v.args[1],cc_g(v.args[2].args[3]+1)*(v.args[2].args[2]-v.args[2].args[1])+v.args[2].args[1],parse(v1),v.args[2].args[1:2])
 end
 
 abstract Stochastic <: State
@@ -22,7 +23,7 @@ type AR{S} <: Stochastic
     bounds::Vector{Float64}
 
     function AR(v::Expr)
-        x,T = rouwenhorst(v.args[2].args[1:3]...,CC.M(1+v.args[2].args[4]))
+        x,T = rouwenhorst(v.args[2].args[1:3]...,SparseGrids.M(1+v.args[2].args[4]))
         new{v.head == :(:=) ? Collective : Idiosyncratic}(v.args[1],v.args[2].args[1],v.args[2].args[2],v.args[2].args[3],x,T,collect(extrema(x)))
     end
 end
@@ -33,8 +34,7 @@ type Markov{S} <: Stochastic
     T::Array{Float64,2}
     bounds::Vector{Float64}
     function Markov(v::Expr)
-        # S = v1.head == :(:=) ? Collective : Idiosyncratic
-        new{v.head == :(:=) ? Collective : Idiosyncratic}(v.args[1],CC.g(v.args[2].args[3]+1)*(v.args[2].args[1].args[2]-v.args[2].args[1].args[1])+v.args[2].args[1].args[1],eval(current_module(),v.args[2].args[2]),eval(current_module(),v.args[2].args[1]))
+        new{v.head == :(:=) ? Collective : Idiosyncratic}(v.args[1],cc_g(v.args[2].args[3]+1)*(v.args[2].args[1].args[2]-v.args[2].args[1].args[1])+v.args[2].args[1].args[1],eval(current_module(),v.args[2].args[2]),eval(current_module(),v.args[2].args[1]))
     end
 end
 
@@ -130,6 +130,11 @@ function parseex(ex::Expr)
 end
 parse(ex::Expr) = parseex(ex)(ex)
 
+
+"""
+    parsevars(foc,states,vars,params)
+Parses model equations and variables.
+"""
 function parsevars(foc::Expr,states::Expr,vars::Expr,params::Expr)
     parameters   = Dict{Symbol,Float64}(zip([x.args[1] for x in params.args],[x.args[2] for x in params.args]))
     variables = Variable[]
