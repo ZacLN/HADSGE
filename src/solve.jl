@@ -15,7 +15,7 @@ function updateXP(M::Model)
     end
 end
 
-@polly function forceboundsU(M::Model)
+function forceboundsU(M::Model)
     ns = length(State(M.variables))
     for v ∈ Policy(M.variables)
         lb = v.bounds[1]::Float64
@@ -35,20 +35,19 @@ end
 
 
 function solve(M::Model,n::Int=1000,ϕ::Float64=0.8;disp::Int=10000,crit=1e-6)
-    MaxError = maximum(abs(M.Fval),1)
-    SError = sum(abs(M.Fval).>crit*5,1)/length(M)
+    MaxError = maximum(abs.(M.Fval),1)
+    SError = sum(abs.(M.Fval).>crit*5,1)/length(M)
     updateallD(M)
     SPids  = [(find(State(M.variables),s.name),find(State(M.variables,true),s.name))::Tuple{Int,Int} for s in Endogenous(M.variables)]
     ns = length(M.G.L)
     nG = length(M)
 
-    # if !active(M.summary.displays[end])
-    #     @js M.summary.displays[end] document.getElementById("solvestep").innerHTML="Equations"
-    # end
+    ne = length(MaxError)
+    Fval = zeros(ne)
+    Jval = zeros(ne,ne)
 
-    tstart = time()
     for iter = 1:n
-        (iter <= 5 || mod(iter,20)==0 || iter < 5) && (M.F(M);MaxError = maximum(abs(M.Fval),1);SError = sum(abs(M.Fval).>crit*5,1)/length(M))
+        (iter <= 5 || mod(iter,20)==0 || iter < 5) && (M.F(M);MaxError = maximum(abs.(M.Fval),1);SError = sum(abs.(M.Fval).>crit*5,1)/length(M))
         for s in SPids
             for j = 1:size(M.ProbWeights,2)
                 for i = 1:nG
@@ -57,10 +56,12 @@ function solve(M::Model,n::Int=1000,ϕ::Float64=0.8;disp::Int=10000,crit=1e-6)
             end
         end
         updateXP(M)
-        M.Fall(M,ϕ)
+        # M.Fall(M,ϕ)
+        @threadsfixed [Fval,Jval] for i = 1:nG
+            M.Finner(M,i,nG,Fval,Jval,ϕ)
+        end
         forceboundsU(M)
-        mod(iter,disp)==0 && println(round(log10(MaxError),2),"  ",round(SError,2))
-        # mod(iter,disp)==0 && active(M.summary.displays[end]) && (@async displaysolve(M,iter,n,MaxError,SError,time()-tstart))
+        mod(iter,disp)==0 && println(round(log10.(MaxError),2),"  ",round(SError,2))
         iter>min(n,5)  && (maximum(MaxError)<crit || all(SError.<0.025)) && (print(iter);break)
     end
     # displaysolve(M,"done",n,MaxError,SError,time()-tstart)

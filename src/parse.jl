@@ -10,10 +10,14 @@ operators = [:-
             :exp
             :log
             :Expect
+            :abs
             :max
             :min
             :∫
-            :≤]
+            :<
+            :>
+            :≤
+            :≥]
 
 
 """
@@ -189,6 +193,7 @@ function addpweights!(x,nP)
   if typeof(x) == Expr
     if (x.head == :call) && (x.args[1] == :*) && (x.args[2]==:ProbWeights)
       return sum([subs(x.args[3],:j=>j)*:(M.ProbWeights[i,$j]) for j = 1:nP])
+        # return :(sum($(x.args[3])*M.ProbWeights[i,j] for j = 1:$nP))
     else
       for i = 1:length(x.args)
         x.args[i]=addpweights!(x.args[i],nP)

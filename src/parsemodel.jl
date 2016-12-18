@@ -42,7 +42,7 @@ type Policy <: Variable
     name::Symbol
     init::Union{Float64,Expr}
     bounds::Vector{Float64}
-    Policy(v::Expr) = new(v.args[1],v.args[2].args[3],v.args[2].args[1:2])
+    Policy(v::Expr) = new(v.args[1],v.args[2].args[3],(x->x==:Inf ? 1e10 : x).(v.args[2].args[1:2]))
 end
 
 abstract Static <: Variable

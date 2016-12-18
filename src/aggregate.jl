@@ -46,10 +46,8 @@ function updateT(M::Model)
     ccnt = zeros(UInt32,N)
 
     ne = length(Endo)
-    # progress=zeros(Int32,Base.Threads.nthreads())
-    for i = 1:N
-        # progress[threadid()]+=1
-        # threadid()==1 && div(i,80)==0 && print(signif(sum(progress)/N,3)," ")
+
+    @threads for i = 1:N
         brackets = [bracket(Pf[ie][i],Endo[ie].x) for ie = 1:length(Endo)]
         S1= collect(ind2sub(Gdims,i))[ne+1:end]
         abrackets = kron(brackets...)
@@ -84,7 +82,7 @@ function updated(M::Model)
     d0 = M.distribution.d[:]+.25
     for j = 1:5000
         d1=M.distribution.T*d0
-        mean(abs((d1[:]-d0[:])))<1e-10 && break
+        mean(abs.((d1[:]-d0[:])))<1e-10 && break
         d0[:]=d1[:]/sum(d1)
         if j==5000
             warn("Model distribution did not converge")
@@ -144,6 +142,7 @@ function updateAggregates(M::Model,ϕ=1.0)
 
             X   = ndgrid([e.x for e in eag]...)
             Xid = findfirst(M.variables,s)
+            # tX = zeros(size(M.X,1))
             for ii = 1:length(X[1])
                 id=BitArray(.*([M[eag[ie].name,t[ie]].==X[ie][ii] for ie = 1:length(eag)]...))
                 M.X[id,Xid] *= (1-ϕ)
@@ -152,8 +151,9 @@ function updateAggregates(M::Model,ϕ=1.0)
         end
     else
         for s ∈ Aggregate(M.variables)
-            M.X[:,findfirst(M.variables,s)] *= (1-ϕ)
-            M.X[:,findfirst(M.variables,s)] += ϕ*∫(M,s.target.name,timeof(s.target))
+            # M.X[:,findfirst(M.variables,s)] *= (1-ϕ)
+            # M.X[:,findfirst(M.variables,s)] += ϕ*∫(M,s.target.name,timeof(s.target))
+            M.X[:,findfirst(M.variables,s)] = (1-ϕ)*M.X[:,findfirst(M.variables,s)] + ϕ*∫(M,s.target.name,timeof(s.target))
         end
     end
 end
@@ -166,7 +166,8 @@ function setaggregate!(M::Model,s::Symbol,x)
         t = [isa(e,Endogenous) ? -1 : 0 for e in eag]
         X   = ndgrid([e.x for e in eag]...)
         @assert size(X[1]) == size(x) "size(x) must equal size of aggregate state space"
-        Xid = findfirst(M.variables,M[s])
+        # Xid = findfirst(M.variables,M[s])
+        Xid = findfirst(x->x.name==s && !isa(x,State),M.variables)
         for ii = 1:length(X[1])
             id=BitArray(.*([M[eag[ie].name,t[ie]].==X[ie][ii] for ie = 1:length(eag)]...))
             M.X[id,Xid] =x[ii]

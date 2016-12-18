@@ -1,4 +1,4 @@
-using Blink,Base.Threads
+using Base.Threads
 
 
 type Distribution
@@ -9,7 +9,7 @@ end
 type ModelSummary
     equations::Expr
     parameters::Dict
-    displays::Vector{Window}
+    displays#::Vector{Window}
 end
 
 type Model
@@ -20,6 +20,8 @@ type Model
     XP::Array{Float64,2}
     F::Function
     Fall::Function
+    Fouter::Function
+    Finner::Function
     Fval::Array{Float64,2}
     variables::Vector{Variable}
     distribution::Distribution
@@ -35,8 +37,8 @@ function Model(foc,states,vars,params,B=Quadratic)
     foc1 = deepcopy(foc)
     variables,parameters,F,J = parsevars(foc,states,vars,params)
     G,S,SP,ProbWeights       = initS(State(variables),B)
-    F1 = deepcopy(F)
-    Fall                     = buildSolver(F,J,G,variables)
+    F1      = deepcopy(F)
+    Fall,outfunc,infunc    = buildSolver(F,J,G,variables)
     X       = [S zeros(length(G),length(Policy(variables))+length(Static(variables)))]
     XP      = zeros(length(G)*size(ProbWeights,2),length(Future(variables)))
 
@@ -45,13 +47,13 @@ function Model(foc,states,vars,params,B=Quadratic)
 
     F1       = :($(gensym(:F))(M::Model) = @fastmath $(buildfunc(F1,:(M.Fval))))
 
-    M = Model(G,SP,ProbWeights,X,XP,eval(F1),eval(Fall),zeros(length(G),length(Policy(variables))),variables,distribution,(Fall,),ModelSummary(foc1,parameters,[]))
+    M = Model(G,SP,ProbWeights,X,XP,eval(F1),eval(Fall),eval(outfunc),eval(infunc),zeros(length(G),length(Policy(variables))),variables,distribution,(Fall,outfunc,infunc),ModelSummary(foc1,parameters,[]))
+
     precompile(M.Fall,(Model,))
+
 
     initX(M)
     initD(M)
-
-    solve((M),2)
 
     return M
 end
@@ -59,12 +61,27 @@ end
 (M::Model)(s::Symbol,x::Array{Float64,2}) = M.G(M[s,0],x)
 
 function getindex(M::Model,x::Symbol,t::Int)
-    for i ∈ 1:length(M.variables)
-        if M.variables[i].name==x && timeof(M.variables[i])==t
-            return M.X[:,i]
+    if t≤0
+        for i ∈ 1:length(M.variables)
+            if M.variables[i].name==x && timeof(M.variables[i])==t
+                return M.X[:,i]
+            end
+        end
+    else
+        for i ∈ 1:length(Stochastic(M.variables))
+            if Stochastic(M.variables)[i].name==x
+                return M.SP[:,length(Endogenous(M.variables))+i]
+            end
+        end
+        for i ∈ 1:length(Future(M.variables))
+            if Future(M.variables)[i].name==x && timeof(Future(M.variables)[i])==t
+                return M.XP[:,i]
+            end
         end
     end
 end
+
+Expect(M::Model,x::Symbol) = vec(sum(reshape(M[x,1],size(M.ProbWeights)).*M.ProbWeights,2))
 
 function setindex!(M::Model,x,v::Symbol,t::Int)
     for i ∈ 1:length(M.variables)
@@ -116,7 +133,7 @@ function buildSolver(F,J,G,variables)
     end
 
     for i = 1:length(J.args)
-        if isa(J.args[i],Number)
+        if isa(J.args[i],Number) && J.args[i]==0
             J.args[i] !=0 && push!(Fexpr.args[2].args,:(Jval[$i]=$(J.args[i])))
         else
             push!(mainloopblock.args,:(Jval[$i]=$(J.args[i])))
@@ -126,23 +143,14 @@ function buildSolver(F,J,G,variables)
     push!(mainloopblock.args,:(A_ldiv_B!(lufact(Jval),Fval)))
     push!(mainloopblock.args,Expr(:for,:(j=1:$(length(Policy(variables)))),Expr(:macrocall,Symbol("@inbounds"),:(M.X[i,$(length(State(variables)))+j]-=ϕ*Fval[j]))))
     mainloop = Expr(:macrocall,Symbol("@threadsfixed"),:([Fval,Jval]),Expr(:for,:(i=1:(length(M))),mainloopblock))
-    # mainloop = Expr(:for,:(i=1:(length(M))),mainloopblock)
+
+    push!(Fexpr.args[2].args,:(N = length(M)))
+    subs!(mainloop,:(length(M))=>(:N))
     push!(Fexpr.args[2].args,mainloop)
-    # Fexpr = subspow!(Fexpr)
-    return Fexpr
+
+    outfunc = Expr(:function,:($(gensym("OuterFunc"))(M::Model,ϕ=0.8)),Expr(:block,:(Fval=zeros($(length(Policy(variables))))),:(Jval=zeros($(length(Policy(variables))),$(length(Policy(variables))))),:(N = length(M)),Expr(:macrocall,Symbol("@threadsfixed"),:([Fval,Jval]),Expr(:for,:(i=1:(length(M))),:(M.Finner(M,i,N,Fval,Jval,ϕ))))))
+    infunc  = Expr(:function,:($(gensym("InnerFunc"))(M,i,N,Fval,Jval,ϕ)),mainloopblock)
+
+
+    return Fexpr,outfunc,infunc
 end
-
-
-# subs!(mainloopblock,:(length(M))=>length(G))
-
-# list = findrepeated(mainloopblock);
-# v = [collect(keys(list)) collect(values(list)) map(length,collect(keys(list)))];
-# id = (v[:,2].>5) & (v[:,3].>20)
-# v   = v[id,:]
-# v = v[reverse(sortperm(v[:,3])),:]
-#
-# for v in v[:,1]
-#     gsn = Symbol("tempvar"*randstring(3))
-#     subs!(mainloopblock,v=>gsn)
-#     unshift!(mainloopblock.args,Expr(:(=),gsn,v))
-# end
